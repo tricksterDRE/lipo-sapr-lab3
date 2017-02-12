@@ -1,13 +1,13 @@
 # Makefile using Lex to build
 
 CC     = gcc
-CFLAGS = -c
+CFLAGS = -std=c99
 
 LEX    = lex
 LFLAGS =
 
 LN     = gcc
-LNFLAGS=
+LNFLAGS= -std=c99
 
 SRC    = calc.l mystack.c mystack.h
 OBJ    = calc.o mystack.o
