@@ -26,13 +26,27 @@ typedef enum {
     LexMinus,
     LexDiv,
     LexMult,
+    LexDiapStart,
+    LexDiapEnd,
+    LexDiapDelim,
+    LexDiapMultPre,
+    LexDiapMultPost,
+    LexNumberInDiap,
+    LexComma,
     LexEnd,
     LexUnknown,
 } LexType;
 
 my_stack stack;
 
+int diap_opened;
+int delim_parsed;
+int comma_parsed;
+int num_count;
 int end_file;
+
+void clean_stack_and_flags();
+void clean_flags();
 
 %}
 
@@ -40,6 +54,7 @@ int end_file;
 
 digit     [0-9]
 number    {digit}+
+delimiter \.\.\.
 
 %%
 
@@ -47,6 +62,27 @@ number    {digit}+
 		  int_value=atoi(yytext);
 		  fprintf(stderr, "found %d\n", int_value);
 		  return LexNumber; }
+{delimiter} {
+          fprintf(stderr, "...\n");  
+          return LexDiapDelim; }
+\[           {
+          fprintf(stderr, "[\n");  
+          return LexDiapStart;}
+,           {
+          fprintf(stderr, ",\n");  
+          return LexComma;}
+\]           {
+          fprintf(stderr, "]\n");  
+          return LexDiapEnd;}
+\*nd        {
+          fprintf(stderr, "diap * pre\n");  
+          return LexDiapMultPre;}
+\*dn        {
+          fprintf(stderr, "diap * post\n");  
+          return LexDiapMultPost;}
+\?d         {
+          fprintf(stderr, "is number in diap\n");  
+          return LexNumberInDiap;}
 \+		{
 		  fprintf(stderr, "plus\n");
 		  return LexPlus; }
@@ -76,13 +112,155 @@ int process_command(int token)
     fprintf(stderr, "token: %d\n", token);
 
     switch (token) {
-    case LexNumber:
-        my_stack_push(&stack, int_value);
-        if (my_stack_is_full(&stack)) {
+    case LexDiapStart: {
+        if (diap_opened == 1 || delim_parsed == 1 || comma_parsed == 1 || num_count > 0) {
             return -1;
         }
-        break;
+        diap_opened = 1;
+        num_count = 0;
+        
+        break;}
+        
+    case LexNumber: {
+        if (diap_opened == 1) {
+            if ((num_count == 0)
+                || (num_count == 1 && delim_parsed == 1)
+                || (num_count == 1 && comma_parsed == 1)
+                || (num_count == 2 && comma_parsed == 1 && delim_parsed == 1)
+            ) {
+                my_stack_push(&stack, int_value);
+                if (my_stack_is_full(&stack)) {
+                    return -1;
+                }
+                num_count++;
+            } else {
+                return -1;
+            }
+            if (num_count > 3) {
+                return -1;
+            }
+        } else {
+            my_stack_push(&stack, int_value);
+            if (my_stack_is_full(&stack)) {
+                return -1;
+            }
+        }
+        break; }
+        
+    case LexComma: {
+        if (comma_parsed == 1 || delim_parsed == 1 || diap_opened == 0) {
+            return -1;
+        }
+        
+        comma_parsed = 1;
+        break; }
+        
+    case LexDiapDelim: {
+        if (delim_parsed == 1 || diap_opened == 0) {
+            return -1;
+        }
+        if (num_count == 1) {
+            delim_parsed = 1;
+            my_stack_push(&stack, 1);
+        }
+        else if ((num_count == 2 && comma_parsed == 1)) {
+            delim_parsed = 1;
+        } else {
+            return -1;
+        }
+        break;}
+        
+    case LexDiapEnd: {
+        if (diap_opened == 0) {
+            return -1;
+        }
+        if ((num_count == 2 && delim_parsed == 1)
+            || (num_count == 3 && delim_parsed == 1 && comma_parsed == 1)
+        ) {
+            clean_flags();
+        } else {
+            return -1;
+        }
+        break;}
+        
+    case LexDiapMultPost: {
+        if (diap_opened == 1 
+            || comma_parsed == 1 
+            || delim_parsed == 1
+            || my_stack_count < 4 
+            || my_stack_is_full(&stack)
+        ) {
+            return -1;
+        }
+        int mult = my_stack_pull(&stack);
+        int end = my_stack_pull(&stack);
+        int step = my_stack_pull(&stack);
+        int start = my_stack_pull(&stack);
+        if (mult != 0) {
+            start *= mult;
+            end *= mult;
+        }
+        my_stack_push(&stack, end);
+        my_stack_push(&stack, step);
+        my_stack_push(&stack, start);
+        break; }
+        
+    case LexDiapMultPre: {
+        if (diap_opened == 1 
+            || comma_parsed == 1 
+            || delim_parsed == 1
+            || my_stack_count < 4 
+            || my_stack_is_full(&stack)
+        ) {
+            return -1;
+        }
+        int end = my_stack_pull(&stack);
+        int step = my_stack_pull(&stack);
+        int start = my_stack_pull(&stack);
+        int mult = my_stack_pull(&stack);
+        if (mult != 0) {
+            start *= mult;
+            end *= mult;
+        }
+        my_stack_push(&stack, end);
+        my_stack_push(&stack, step);
+        my_stack_push(&stack, start);
+        break; }
+        
+    case LexNumberInDiap: {
+        if (diap_opened == 1 
+            || comma_parsed == 1 
+            || delim_parsed == 1
+            || my_stack_count < 4 
+            || my_stack_is_full(&stack)
+        ) {
+            return -1;
+        }
+        int number = my_stack_pull(&stack);
+        int stop = my_stack_get_deep(&stack, 1);
+        int step = my_stack_get_deep(&stack, 2);
+        int start = my_stack_get_deep(&stack, 3);
+        int state = 0;
+        if (start == stop && step == 0 && number == start) {
+            state = 1;
+        } else if (start != stop && step == 0) {
+            state = 0;
+        }
+        for (int i = start; i < stop; i += step) {
+            if (i == number) {
+                state = 1;
+                break;
+            } else {
+                continue;
+            }
+        }
+        my_stack_push(&stack, state);
+        break; }
+        
     case LexPlus: {
+        if (diap_opened == 1) {
+            return -1;
+        }
         if (my_stack_is_empty(&stack)) {
             return -1;
         }
@@ -99,6 +277,9 @@ int process_command(int token)
         }
         break;}
     case LexMinus: {
+        if (diap_opened == 1) {
+            return -1;
+        }
         if (my_stack_is_empty(&stack)) {
             return -1;
         }
@@ -115,6 +296,9 @@ int process_command(int token)
         }
         break;}
     case LexDiv: {
+        if (diap_opened == 1) {
+            return -1;
+        }
         if (my_stack_is_empty(&stack)) {
             return -1;
         }
@@ -131,6 +315,9 @@ int process_command(int token)
         }
         break;}
     case LexMult: {
+        if (diap_opened == 1) {
+            return -1;
+        }
         if (my_stack_is_empty(&stack)) {
             return -1;
         }
@@ -169,6 +356,7 @@ int calc_line()
             break;
         }
         else if (cmd_res == -1) {
+            clean_stack_and_flags();
             fprintf(stderr, "Syntax error\n");
             return 0;
         }
@@ -179,14 +367,31 @@ int calc_line()
         fprintf(stderr, "Stack is empty but required value\n");
         return 0;
     }
-
-    int result = my_stack_pull(&stack);
-    fprintf(yyout, "%d ", result);
-
-    if (!my_stack_is_empty(&stack)) {
-        fprintf(stderr, "Stack not empty after calculation\n");
-        return 0;
+    
+    if (my_stack_count(&stack) == 4) {
+        int result = my_stack_pull(&stack);
+        fprintf(yyout, "%d ", result);
     }
+        
+    if (my_stack_count(&stack) == 3) {
+        fprintf(yyout, "range(");
+        for (int i = 0; i < 3; i++) {
+            int result = my_stack_pull(&stack);
+            fprintf(yyout, "%d", result);
+            
+            if (i != 2) {
+                fprintf(yyout, ", ");
+            }
+        }
+        fprintf(yyout, ") ");
+    } else {
+        for (int i = 0; i < my_stack_count(&stack); i++) {
+            int result = my_stack_pull(&stack);
+            fprintf(yyout, "%d ", result);
+        }
+    }
+    
+    clean_stack_and_flags();
 
     return 1;
 }
@@ -208,11 +413,26 @@ void calc()
     }
 }
 
+void clean_flags()
+{
+    diap_opened = 0;
+    comma_parsed = 0;
+    delim_parsed = 0;
+    num_count = 0;
+}
+
+void clean_stack_and_flags()
+{
+    clean_flags();
+    my_stack_clean(&stack);
+}
+
 int main(void)
 {
     my_stack_init(&stack, 100);
     end_file = 0;
-
+    clean_stack_and_flags();
+    
     calc();
 
     my_stack_done(&stack);
