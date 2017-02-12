@@ -31,6 +31,11 @@ void my_stack_done(my_stack* stack);
 void my_stack_push(my_stack* stack, int value);
 int my_stack_pull(my_stack* stack);
 
+void my_stack_clean(my_stack* stack);
+int my_stack_count(my_stack* stack);
+
+int my_stack_get_deep(my_stack* stack, int index);
+
 int my_stack_top(my_stack* stack);
 int my_stack_is_empty(my_stack* stack);
 int my_stack_is_full(my_stack* stack);
